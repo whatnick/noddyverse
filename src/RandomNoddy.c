@@ -78,6 +78,10 @@ int RandomNoddy(char *output , int DataBase) {
 //	}
 
 	report_Random_status(output, DataBase);
+	/* FM4G patch: NODDY_HIS_ONLY -> stop after writing the history; render it
+	   separately with `noddy <his> <out> BLOCK` */
+	if (getenv("NODDY_HIS_ONLY"))
+		return (TRUE);
 
 	doGeophysics(BLOCK_AND_ANOM, viewOptions, geophOptions, output, output,
 			NULL, 0, NULL, NULL, NULL);
@@ -139,7 +143,11 @@ static int loadRandomHistory(numEvents)
 	gettimeofday(&start, NULL);
 
 	//printf("%ld %ld\n",query,start.tv_sec,start.tv_usec);
-	xrshr128p_init((uint64_t) (start.tv_sec * 1000000 + start.tv_usec), &state);
+	/* FM4G patch: NODDY_SEED -> deterministic, reproducible histories */
+	if (getenv("NODDY_SEED"))
+		xrshr128p_init((uint64_t) strtoull(getenv("NODDY_SEED"), NULL, 10), &state);
+	else
+		xrshr128p_init((uint64_t) (start.tv_sec * 1000000 + start.tv_usec), &state);
 
 	// for(event=0;event<10;event++)  printf("%d %lf\n",query,event,xrshr128p_next_double(&state)); exit(1);
 
@@ -465,7 +473,9 @@ int loadRandomBlockOpts()
 	currentView = 1;
 
 	sprintf(vname, "View1");
-	viewOptions = newViewOptions(vname, 0, 0, 4000, 4000, 4000, 4000, 20, 20);
+	/* FM4G patch: NODDY_CUBE (m). 250 -> 16^3 over the 4 km cube */
+	geolCube = getenv("NODDY_CUBE") ? atof(getenv("NODDY_CUBE")) : 20.0;
+	viewOptions = newViewOptions(vname, 0, 0, 4000, 4000, 4000, 4000, geolCube, geolCube);
 
 	/*blockViewOptions->originX = 0;
 	 blockViewOptions->originY = 0;
@@ -863,6 +873,9 @@ int loadRandomDyke(options)
 
 	options->slipLength = 0;
 	options->width = 100 + 300.0 * xrshr128p_next_double(&state);
+	/* FM4G patch: NODDY_MIN_DYKE_W (m) clamps sub-voxel dykes; RNG stream unchanged */
+	if (getenv("NODDY_MIN_DYKE_W") && options->width < atof(getenv("NODDY_MIN_DYKE_W")))
+		options->width = atof(getenv("NODDY_MIN_DYKE_W"));
 
 	options->alterationZones = NONE_ALTERATION;
 
@@ -1281,6 +1294,9 @@ int loadRandomProperties(layer, options)
 	else {
 		options->height = 50
 				+ (950.0 * xrshr128p_next_double(&state));
+		/* FM4G patch: NODDY_MIN_LAYER_H (m) clamps sub-voxel layers; RNG stream unchanged */
+		if (getenv("NODDY_MIN_LAYER_H") && options->height < atof(getenv("NODDY_MIN_LAYER_H")))
+			options->height = (int) atof(getenv("NODDY_MIN_LAYER_H"));
 		cum_height += options->height;
 		options->height = cum_height;
 	}

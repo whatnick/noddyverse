@@ -1,0 +1,69 @@
+name: noddy-image
+
+# Builds the static Noddy CLI for linux/amd64 + linux/arm64 and publishes it to
+# ghcr.io/<owner>/noddyverse. A regression test pins the seeded RANDOM generator:
+# NODDY_SEED=7, NODDY_CUBE=250 must render a 16^3 block with a known sha256 on
+# EVERY architecture before anything is pushed.
+on:
+  push:
+    branches: [fm4g/seeded-block-image, main]
+    tags: ["fm4g-v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/noddyverse
+  # 16^3 lithology block for NODDY_SEED=7 NODDY_CUBE=250 (verified amd64 + arm64)
+  SEED7_G12_SHA256: 634441418403b363959f3d5d4d96daf729c65e30ed0da27005a1734c2458a132
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build + regression-test each architecture
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            docker buildx build --platform linux/$arch --load -t noddy-ci:$arch .
+            d=$(mktemp -d); chmod 777 "$d"
+            docker run --rm --platform linux/$arch -v "$d":/w -w /w \
+              -e NODDY_SEED=7 -e NODDY_CUBE=250 -e NODDY_HIS_ONLY=1 noddy-ci:$arch x s7.his RANDOM >/dev/null 2>&1 || true
+            docker run --rm --platform linux/$arch -v "$d":/w -w /w noddy-ci:$arch s7.his b7 BLOCK >/dev/null 2>&1 || true
+            got=$(sha256sum "$d/b7.g12" | cut -d' ' -f1)
+            echo "$arch seed-7 block sha256: $got"
+            test "$got" = "$SEED7_G12_SHA256"
+          done
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=match,pattern=fm4g-v.*
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/fm4g-v') }}
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false

@@ -21,3 +21,35 @@ The models consist of 20 m cubic voxels (200x200x200 voxels per model), and the 
 
 
 
+
+## FM4G fork: seeded, static, multi-arch Noddy image
+
+This fork (`whatnick/noddyverse`, branch `fm4g/seeded-block-image`) adds a small,
+**default-off** patch to `src/RandomNoddy.c` and a container build, for generating
+reproducible Noddyverse-distribution blocks at scale (CSIRO FM4G / EASI).
+
+**Image:** `ghcr.io/whatnick/noddyverse` — static Noddy CLI (Alpine/musl build,
+runs in any Linux image), `linux/amd64` + `linux/arm64`, ~2.5 MB (busybox base).
+
+```bash
+docker run --rm -v $PWD:/w -w /w ghcr.io/whatnick/noddyverse:fm4g-v1 model.his out BLOCK
+# copy the binary into another image (e.g. a Kubernetes init container):
+#   cp /usr/local/bin/noddy /tools/noddy
+```
+
+**RANDOM-mode environment variables** (all optional; unset = original behaviour):
+
+| Variable | Effect |
+|---|---|
+| `NODDY_SEED` | seed the xoroshiro128+ generator (default: wall clock) → identical history per seed, on every architecture |
+| `NODDY_CUBE` | geology/geophysics cube size in m over the 4 km Noddyverse cube (default 20 → 200³; 250 → 16³) |
+| `NODDY_HIS_ONLY` | write the history and stop (skip the 200³ block + anomaly render); render it with `noddy <his> <out> BLOCK` |
+| `NODDY_MIN_DYKE_W` | clamp dyke width to ≥ this (m) — avoids sub-voxel dykes at coarse cubes; RNG stream unchanged |
+| `NODDY_MIN_LAYER_H` | clamp each stratigraphic layer increment to ≥ this (m); RNG stream unchanged |
+
+Kinematic geology is scale-free, so a 4 km model rendered at `NODDY_CUBE=250` (16³) is
+exactly the Noddyverse distribution rescaled to a 16³ block; it agrees with the 200³
+render at 99.6 % of the 16³ cell centres (seed 7). CI pins `NODDY_SEED=7 NODDY_CUBE=250`
+to a known block hash on both architectures. Output layers in `.g12` run top → bottom,
+and rock codes with density / susceptibility are listed in `.g00`. History files differ
+across runs only in the `#Filename` / `#Date Saved` header lines.
